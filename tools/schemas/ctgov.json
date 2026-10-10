@@ -1,0 +1,17 @@
+[
+  {
+    "name": "search_trials",
+    "description": "Search ClinicalTrials.gov for registered clinical studies by condition, optionally filtered by intervention, recruitment status and phase. Returns NCT IDs, titles, status, phase, sponsor, enrollment and key dates. Use for clinical operations, site feasibility and competitive landscape questions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "condition": {"type": "string", "description": "Disease or condition, e.g. 'type 2 diabetes'."},
+        "intervention": {"type": "string", "description": "Optional drug or intervention name."},
+        "status": {"type": "string", "description": "Optional: RECRUITING, NOT_YET_RECRUITING, ACTIVE_NOT_RECRUITING, COMPLETED, TERMINATED, SUSPENDED, WITHDRAWN, ENROLLING_BY_INVITATION."},
+        "phase": {"type": "string", "description": "Optional: EARLY_PHASE1, PHASE1, PHASE2, PHASE3, PHASE4."},
+        "page_size": {"type": "integer", "description": "Studies to return, 1-25. Default 10."}
+      },
+      "required": ["condition"]
+    }
+  }
+]

@@ -1,0 +1,15 @@
+# Local state written by the setup scripts (contains demo passwords)
+.demo-state.json
+.demo-users.json
+cdk-outputs.json
+
+# CDK
+infra/cdk.out/
+infra/cdk.context.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/

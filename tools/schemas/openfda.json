@@ -1,0 +1,44 @@
+[
+  {
+    "name": "search_adverse_events",
+    "description": "Summarize post-marketing adverse event reports (FDA FAERS) for a drug: total report count and the most frequently reported reactions (MedDRA preferred terms). Use for pharmacovigilance and safety signal questions about a marketed drug.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "drug_name": {"type": "string", "description": "Generic or brand name, e.g. 'semaglutide' or 'Ozempic'."},
+        "serious_only": {"type": "boolean", "description": "Only count reports flagged serious (death, hospitalization, disability, life-threatening)."},
+        "top_n": {"type": "integer", "description": "Number of top reactions to return, 1-25. Default 10."}
+      },
+      "required": ["drug_name"]
+    }
+  },
+  {
+    "name": "search_recalls",
+    "description": "Find FDA drug recall and enforcement reports by product name, optionally filtered by recall classification. Returns recall number, class, status, firm and reason.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "product_query": {"type": "string", "description": "Product or drug name to search in recall product descriptions."},
+        "classification": {"type": "string", "description": "Optional: 'Class I', 'Class II' or 'Class III'."},
+        "limit": {"type": "integer", "description": "Max recalls to return, 1-20. Default 5."}
+      },
+      "required": ["product_query"]
+    }
+  },
+  {
+    "name": "get_drug_label",
+    "description": "Retrieve sections of the current FDA-approved drug label (prescribing information), such as boxed warning, indications, contraindications, warnings and precautions, adverse reactions and drug interactions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "drug_name": {"type": "string", "description": "Generic or brand name."},
+        "sections": {
+          "type": "array",
+          "description": "Label sections to return. Allowed: boxed_warning, indications_and_usage, contraindications, warnings_and_cautions, warnings, adverse_reactions, drug_interactions.",
+          "items": {"type": "string"}
+        }
+      },
+      "required": ["drug_name"]
+    }
+  }
+]

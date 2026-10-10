@@ -1,0 +1,32 @@
+[
+  {
+    "name": "log_safety_signal",
+    "description": "Record a new drug safety signal in the pharmacovigilance signal log for review by the safety team. This writes a permanent record. Include supporting evidence references.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "drug_name": {"type": "string", "description": "Drug the signal concerns."},
+        "signal_description": {"type": "string", "description": "What was observed and why it may be a signal."},
+        "severity": {"type": "string", "description": "One of: low, moderate, serious, critical."},
+        "evidence_refs": {
+          "type": "array",
+          "description": "Supporting references: NCT IDs, FDA recall numbers (e.g. D-1234-2025), faers:<drug>, or https URLs.",
+          "items": {"type": "string"}
+        }
+      },
+      "required": ["drug_name", "signal_description", "severity"]
+    }
+  },
+  {
+    "name": "list_safety_signals",
+    "description": "List previously logged pharmacovigilance safety signals for a drug, newest first, with severity and status.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "drug_name": {"type": "string", "description": "Drug to look up."},
+        "limit": {"type": "integer", "description": "Max signals to return, 1-50. Default 10."}
+      },
+      "required": ["drug_name"]
+    }
+  }
+]
