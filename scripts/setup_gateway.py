@@ -135,10 +135,19 @@ def create_targets(ctl, state: dict, outputs: dict) -> None:
 def create_policies(ctl, state: dict) -> None:
     print("4. Creating Cedar policies")
     state.setdefault("policies", {})
-    for path in sorted((ROOT / "policies").glob("*.cedar")):
+    # Permits first: CreatePolicy rejects a forbid as "overly restrictive" when no
+    # permit exists yet for the same principal type and action.
+    paths = sorted((ROOT / "policies").glob("*.cedar"), key=lambda p: ("forbid (" in p.read_text(), p.name))
+    for path in paths:
         name = path.stem
         if name in state["policies"]:
-            continue
+            existing = ctl.get_policy(policyEngineId=state["policyEngineId"], policyId=state["policies"][name])
+            if existing["status"] != "CREATE_FAILED":
+                continue
+            print(f"  policy {name}: replacing failed attempt")
+            ctl.delete_policy(policyEngineId=state["policyEngineId"], policyId=state["policies"].pop(name))
+            save_state(state)
+            time.sleep(10)
         statement = path.read_text().replace("{{GATEWAY_ARN}}", state["gatewayArn"])
         resp = ctl.create_policy(
             policyEngineId=state["policyEngineId"],

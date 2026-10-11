@@ -2,20 +2,20 @@
 name = "gateway-discovery-demo"
 version = "0.1.0"
 description = "Strands agent + AgentCore Gateway: dynamic tool discovery with least-privilege enterprise tools"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
-  "boto3>=1.40",
+  "boto3[crt]>=1.40",  # crt: needed for `aws login` credentials
   "requests>=2.32",
   "strands-agents>=1.59",
   "mcp>=1.20",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.8"]
+dev = ["pytest>=8", "ruff>=0.8", "aws-cdk-lib>=2.220.0", "constructs>=10.0.0"]
 
 [tool.ruff]
 line-length = 130
-target-version = "py314"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]

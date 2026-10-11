@@ -73,7 +73,7 @@ class DiscoveryDemoStack(Stack):
             runtime=lambda_.Runtime.PYTHON_3_14,
             architecture=lambda_.Architecture.ARM_64,
             handler="handler.lambda_handler",
-            code=lambda_.Code.from_asset(str(ROOT / "cognito_pretoken")),
+            code=lambda_.Code.from_asset(str(ROOT / "cognito_pretoken"), exclude=["__pycache__", "*.pyc"]),
             timeout=Duration.seconds(5),
         )
         user_pool = cognito.UserPool(

@@ -31,7 +31,7 @@ from strands.tools.mcp import MCPClient
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "demo"))
 from gateway_client import MAX_TOOLS, SEARCH_TOOL, access_token, state  # noqa: E402
 
-MODEL_ID = os.environ.get("MODEL_ID", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+MODEL_ID = os.environ.get("MODEL_ID", "us.amazon.nova-pro-v1:0")
 
 SYSTEM_PROMPT = """You are a life sciences research assistant working through governed enterprise tools.
 Use only the tools you have been given. If you have no tool that can answer the question,

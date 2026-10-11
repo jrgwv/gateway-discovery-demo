@@ -9,7 +9,7 @@ Sending any tools at all adds a fixed overhead on top of the schemas themselves.
 The script separates the two, so the projection doesn't multiply that one-off
 cost by the catalog size.
 
-  MODEL_ID=us.anthropic.claude-sonnet-4-5-20250929-v1:0 python demo/token_compare.py
+  MODEL_ID=us.amazon.nova-pro-v1:0 python demo/token_compare.py
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import boto3
 from discovery_matrix import QUERIES
 from gateway_client import MAX_TOOLS, SEARCH_TOOL, list_tools, search_tools, state
 
-MODEL_ID = os.environ.get("MODEL_ID", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+MODEL_ID = os.environ.get("MODEL_ID", "us.amazon.nova-pro-v1:0")
 PERSONA = "safety_lead"  # sees every tool, so "full catalog" is the whole gateway
 RESULTS = Path(__file__).resolve().parent.parent / "results"
 
