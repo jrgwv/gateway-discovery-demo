@@ -26,6 +26,7 @@ The `critical` rule is the interesting one. Tool listing is a meta action evalua
 
 - **Documented:** `tools/list` is filtered by policy. Calls are evaluated with the full request, including arguments. Default deny, and `forbid` wins over `permit`.
 - **Not documented either way:** whether `x_amz_bedrock_agentcore_search` results are policy-filtered, and whether the search tool itself needs a `permit`. `demo/discovery_matrix.py` answers both. The agent intersects search results with `tools/list` regardless, so it's safe whatever the answer.
+- **What we measured (us-east-1, October 2026, policy in `ENFORCE`):** search results are *not* policy-filtered. For `clinical_ops`, every query returned all six tools, including the four `tools/list` hid. The search tool needs no `permit`: it is callable by every persona, though it drops out of `tools/list` under `ENFORCE`. Policy denials arrive as a JSON-RPC error (code -32002). Run the matrix yourself; this is undocumented behaviour and may change.
 
 ## Layout
 
@@ -42,22 +43,22 @@ tests/            Offline tests (no AWS or network needed)
 
 ## Run it
 
-Prerequisites: Python 3.14, Node 22 (for CDK), AWS credentials in a [Policy-supported region](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), and Bedrock model access for your `MODEL_ID`.
+Prerequisites: Python 3.13+, Node 22+ (for CDK), AWS credentials in a [Policy-supported region](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), and Bedrock access to Amazon Nova Pro (the default `MODEL_ID`).
 
 ```bash
 uv sync                       # or: pip install -e . && pip install -r infra/requirements.txt
 uv run pytest                 # offline tests
 
 cd infra
-npx cdk bootstrap             # once per account/region
-npx cdk deploy --outputs-file ../cdk-outputs.json
+uv run npx aws-cdk@latest bootstrap             # once per account/region
+uv run npx aws-cdk@latest deploy --outputs-file ../cdk-outputs.json
 cd ..
 
 uv run scripts/setup_gateway.py           # policy engine attached in LOG_ONLY
-uv run demo/discovery_matrix.py --no-writes
+uv run demo/discovery_matrix.py --no-writes   # smoke test only: nothing is enforced yet
 # Check the Gateway's policy decision logs in CloudWatch, then:
 uv run scripts/setup_gateway.py --enforce
-uv run demo/discovery_matrix.py           # writes results/discovery_matrix.md
+uv run demo/discovery_matrix.py           # the real answer; writes results/discovery_matrix.md
 uv run demo/token_compare.py              # writes results/token_compare.md
 
 uv run agent/agent.py --persona clinical_ops "Any recruiting phase 3 semaglutide trials in obesity?"
@@ -65,24 +66,30 @@ uv run agent/agent.py --persona clinical_ops "What are the top serious adverse e
 uv run agent/agent.py --persona safety_analyst "Log a critical signal for drug X based on faers:drug x"
 ```
 
-The second agent run is the failure case: with no permitted tool for adverse events, the clinical ops agent should say it doesn't have access rather than guess. The third shows a listed tool denied at call time.
+The second agent run is the interesting one: search ranks `search_adverse_events` first, but the clinical ops persona can't see it, so the agent drops it and the model only gets `get_drug_label` and `search_trials`. Watch what the model does next. In our run Nova Pro answered from the drug label's warnings instead of saying it lacked adverse event data, so the tool boundary held but the answer was a substitute. The third run shows a listed tool denied at call time (Strands logs the `MCPError` traceback before the agent reports the denial).
 
-Set `MODEL_ID` to any Bedrock model or inference profile you have access to.
+`MODEL_ID` defaults to `us.amazon.nova-pro-v1:0`. Set it to any Bedrock model or inference profile with tool use that you have access to. Anthropic models need the use case form submitted in the Bedrock console first.
 
 Tear down:
 
 ```bash
-uv run scripts/teardown.py && (cd infra && npx cdk destroy)
+uv run scripts/teardown.py && (cd infra && uv run npx aws-cdk@latest destroy)
 ```
+
+Teardown waits for each delete to finish. If something can't be deleted it keeps `.demo-state.json` and exits non-zero, so re-run it before `cdk destroy`.
 
 ## Things worth knowing
 
 - **Semantic search can only be enabled at gateway creation.** You can't add it later.
 - **Policy order matters.** Create the engine first (the gateway needs its ARN), create targets before policies (policies are validated against a schema generated from the targets), and start in `LOG_ONLY`.
+- **Permits before forbids.** `CreatePolicy` rejects a `forbid` as "overly restrictive" if no `permit` exists yet for the same principal type and action. Scope the `forbid` to `AgentCore::OAuthUser` (an unscoped `principal` also covers `IamEntity`, which has no permit) and create it last.
+- **The Gateway throttles bursts** (HTTP 429), semantic search especially. The raw client retries with backoff.
 - **Gateway execution role** needs `AuthorizeAction`, `PartiallyAuthorizeActions` and `GetPolicyEngine`, or every call is denied. The CDK stack grants them on `policy-engine/*` and `gateway/*` in-account. Scope them to the IDs in `.demo-state.json` once setup has run.
 - **The role running setup** needs `bedrock-agentcore:InvokeGateway`, because `CreatePolicy` validates actions by calling the gateway.
 - **Why a `persona` claim?** Cedar reads JWT claims as string tags. Cognito's `cognito:groups` is an array, so the pre-token trigger flattens it into one string. Access-token customization needs the Cognito Essentials plan.
-- **openFDA gotcha:** a parenthesized OR across two fields (`(generic_name:"x"+brand_name:"x")`) silently matches the whole dataset. The tools query one field at a time.
+- **Drug name lookups** try the generic name, then the brand name. A name also matches combination products (`metformin` matches sitagliptin/metformin), so `get_drug_label` prefers the single-ingredient label and returns `active_ingredients` and `combination_product` so the agent can say which product it read.
+- **If the search tool is denied** under `ENFORCE`, the matrix says so and its verdict is "inconclusive", and the agent falls back to everything `tools/list` returned (still policy-filtered, just no token saving).
+- **`MCP_PROTOCOL_VERSION`** is optional. The raw JSON-RPC client omits the `MCP-Protocol-Version` header by default; set it to a version your gateway supports if raw calls are rejected.
 - **Audit trail:** the signal log stores the AgentCore request and MCP message IDs, so each record joins to the Gateway's policy decision log, which holds the caller identity and the allow/deny result. The Lambda doesn't see the user's JWT. If the record itself must carry the user, add a Gateway REQUEST interceptor to pass it through.
 - **USER_PASSWORD_AUTH and DEBUG exception level** keep the demo scriptable and readable. Use SRP or hosted UI, and drop `exceptionLevel`, for anything real.
 

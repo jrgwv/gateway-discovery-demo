@@ -3,7 +3,7 @@
 // Note: the analyst still SEES log_safety_signal in tools/list, because listing
 // is a meta action with no input context. This rule is enforced at call time.
 forbid (
-  principal,
+  principal is AgentCore::OAuthUser,
   action == AgentCore::Action::"pv___log_safety_signal",
   resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
 )
