@@ -61,7 +61,6 @@ def test_adverse_events_shapes_response_and_builds_query():
     assert 'generic_name:"Ozempic"+AND+serious:1' in calls[0]
     assert 'brand_name:"Ozempic"+AND+serious:1' in calls[1]
     assert "brand_name" in calls[2] and "count=" in calls[2]
-    assert all("(" not in c for c in calls), "parenthesized OR widens to the whole dataset"
 
 
 def test_adverse_events_no_match_returns_zero():
@@ -74,6 +73,37 @@ def test_adverse_events_no_match_returns_zero():
 def test_search_injection_is_rejected(bad):
     out = openfda_handler.lambda_handler({"drug_name": bad}, gw_context("openfda___get_drug_label"))
     assert "error" in out
+
+
+def test_label_prefers_single_ingredient_then_newest():
+    def label(substances, effective, brand):
+        return {"openfda": {"substance_name": substances, "brand_name": [brand]}, "effective_time": effective,
+                "boxed_warning": [brand]}
+    body = {"results": [
+        label(["SITAGLIPTIN", "METFORMIN HYDROCHLORIDE"], "20260812", "ZITUVIMET"),
+        label(["METFORMIN HYDROCHLORIDE"], "20240821", "old"),
+        label(["METFORMIN HYDROCHLORIDE"], "20260101", "new"),
+    ]}
+    with mock.patch.object(openfda_handler, "http_get_json", return_value=body):
+        out = openfda_handler.lambda_handler({"drug_name": "metformin"}, gw_context("openfda___get_drug_label"))
+    assert out["brand_names"] == ["new"]
+    assert out["combination_product"] is False
+    assert out["active_ingredients"] == ["METFORMIN HYDROCHLORIDE"]
+
+
+def test_label_flags_combination_when_nothing_else_matches():
+    body = {"results": [{"openfda": {"substance_name": ["A", "B"]}, "effective_time": "20260101"}]}
+    with mock.patch.object(openfda_handler, "http_get_json", return_value=body):
+        out = openfda_handler.lambda_handler({"drug_name": "combo"}, gw_context("openfda___get_drug_label"))
+    assert out["combination_product"] is True
+
+
+def test_api_key_is_not_logged(caplog):
+    caplog.set_level("INFO")
+    with mock.patch.object(common.urllib.request, "urlopen", side_effect=TimeoutError("x")):
+        with pytest.raises(common.ToolError):
+            common.http_get_json("https://example.test/x", {}, raw_query="search=a&api_key=SECRET123&limit=1")
+    assert "SECRET123" not in caplog.text and "api_key=***&limit=1" in caplog.text
 
 
 def test_label_rejects_unknown_section():

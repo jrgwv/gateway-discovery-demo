@@ -16,6 +16,7 @@ BASE = "https://api.fda.gov/drug"
 API_KEY = os.environ.get("OPENFDA_API_KEY", "")
 SEARCH_SAFE_CHARS = '+:"()[]'
 SAFE_TERM = re.compile(r"^[A-Za-z0-9 \-/.,']{2,80}$")
+LABEL_CANDIDATES = 10
 LABEL_SECTIONS = {
     "boxed_warning",
     "indications_and_usage",
@@ -45,12 +46,13 @@ def _query(search: str, **params) -> str:
     return "&".join(parts)
 
 
-def _first_match(endpoint: str, fields: tuple[str, ...], drug: str, suffix: str = "") -> tuple[str, dict] | None:
-    """Try generic name, then brand name. openFDA silently widens a parenthesized
-    OR across fields to the whole dataset, so query one field at a time."""
+def _first_match(
+    endpoint: str, fields: tuple[str, ...], drug: str, suffix: str = "", limit: int = 1
+) -> tuple[str, dict] | None:
+    """Try generic name, then brand name, and report which search matched."""
     for field in fields:
         search = f'{field}:"{drug}"{suffix}'
-        body = http_get_json(f"{BASE}/{endpoint}", {}, raw_query=_query(search, limit=1))
+        body = http_get_json(f"{BASE}/{endpoint}", {}, raw_query=_query(search, limit=limit))
         if body and body.get("results"):
             return search, body
     return None
@@ -117,6 +119,16 @@ def search_recalls(event: dict, _ctx: dict) -> dict:
     }
 
 
+def _pick_label(results: list[dict]) -> dict:
+    """A name search also matches combination products (metformin -> sitagliptin/metformin),
+    so prefer the label with the fewest active ingredients, then the most recent."""
+    def rank(label: dict) -> tuple[int, int]:
+        ingredients = len(label.get("openfda", {}).get("substance_name", [])) or 99
+        effective = label.get("effective_time") or "0"
+        return ingredients, -int(effective) if effective.isdigit() else 0
+    return min(results, key=rank)
+
+
 def get_drug_label(event: dict, _ctx: dict) -> dict:
     drug = _term(event, "drug_name")
     requested = event.get("sections") or ["boxed_warning", "indications_and_usage", "warnings_and_cautions"]
@@ -126,14 +138,18 @@ def get_drug_label(event: dict, _ctx: dict) -> dict:
     if unknown:
         raise ToolError(f"Unsupported sections: {sorted(unknown)}. Allowed: {sorted(LABEL_SECTIONS)}.")
 
-    match = _first_match("label.json", ("openfda.generic_name", "openfda.brand_name"), drug)
+    match = _first_match("label.json", ("openfda.generic_name", "openfda.brand_name"), drug, limit=LABEL_CANDIDATES)
     if match is None:
         return {"drug_name": drug, "found": False}
-    label = match[1]["results"][0]
+    label = _pick_label(match[1]["results"])
     openfda = label.get("openfda", {})
+    substances = openfda.get("substance_name", [])
     return {
         "drug_name": drug,
         "found": True,
+        "generic_names": openfda.get("generic_name", [])[:3],
+        "active_ingredients": substances[:5],
+        "combination_product": len(substances) > 1,
         "brand_names": openfda.get("brand_name", [])[:3],
         "manufacturer": (openfda.get("manufacturer_name") or [None])[0],
         "effective_time": label.get("effective_time"),

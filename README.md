@@ -54,10 +54,10 @@ npx cdk deploy --outputs-file ../cdk-outputs.json
 cd ..
 
 uv run scripts/setup_gateway.py           # policy engine attached in LOG_ONLY
-uv run demo/discovery_matrix.py --no-writes
+uv run demo/discovery_matrix.py --no-writes   # smoke test only: nothing is enforced yet
 # Check the Gateway's policy decision logs in CloudWatch, then:
 uv run scripts/setup_gateway.py --enforce
-uv run demo/discovery_matrix.py           # writes results/discovery_matrix.md
+uv run demo/discovery_matrix.py           # the real answer; writes results/discovery_matrix.md
 uv run demo/token_compare.py              # writes results/token_compare.md
 
 uv run agent/agent.py --persona clinical_ops "Any recruiting phase 3 semaglutide trials in obesity?"
@@ -75,6 +75,8 @@ Tear down:
 uv run scripts/teardown.py && (cd infra && npx cdk destroy)
 ```
 
+Teardown waits for each delete to finish. If something can't be deleted it keeps `.demo-state.json` and exits non-zero, so re-run it before `cdk destroy`.
+
 ## Things worth knowing
 
 - **Semantic search can only be enabled at gateway creation.** You can't add it later.
@@ -82,7 +84,9 @@ uv run scripts/teardown.py && (cd infra && npx cdk destroy)
 - **Gateway execution role** needs `AuthorizeAction`, `PartiallyAuthorizeActions` and `GetPolicyEngine`, or every call is denied. The CDK stack grants them on `policy-engine/*` and `gateway/*` in-account. Scope them to the IDs in `.demo-state.json` once setup has run.
 - **The role running setup** needs `bedrock-agentcore:InvokeGateway`, because `CreatePolicy` validates actions by calling the gateway.
 - **Why a `persona` claim?** Cedar reads JWT claims as string tags. Cognito's `cognito:groups` is an array, so the pre-token trigger flattens it into one string. Access-token customization needs the Cognito Essentials plan.
-- **openFDA gotcha:** a parenthesized OR across two fields (`(generic_name:"x"+brand_name:"x")`) silently matches the whole dataset. The tools query one field at a time.
+- **Drug name lookups** try the generic name, then the brand name. A name also matches combination products (`metformin` matches sitagliptin/metformin), so `get_drug_label` prefers the single-ingredient label and returns `active_ingredients` and `combination_product` so the agent can say which product it read.
+- **If the search tool is denied** under `ENFORCE`, the matrix says so and its verdict is "inconclusive", and the agent falls back to everything `tools/list` returned (still policy-filtered, just no token saving).
+- **`MCP_PROTOCOL_VERSION`** is optional. The raw JSON-RPC client omits the `MCP-Protocol-Version` header by default; set it to a version your gateway supports if raw calls are rejected.
 - **Audit trail:** the signal log stores the AgentCore request and MCP message IDs, so each record joins to the Gateway's policy decision log, which holds the caller identity and the allow/deny result. The Lambda doesn't see the user's JWT. If the record itself must carry the user, add a Gateway REQUEST interceptor to pass it through.
 - **USER_PASSWORD_AUTH and DEBUG exception level** keep the demo scriptable and readable. Use SRP or hosted UI, and drop `exceptionLevel`, for anything real.
 

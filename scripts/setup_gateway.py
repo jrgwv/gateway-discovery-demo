@@ -51,7 +51,7 @@ def save_state(state: dict) -> None:
 
 
 def wait_for(describe, ok: set[str], label: str, timeout: int = 300) -> dict:
-    """Poll a Get* call until its status is in `ok`; fail loudly on *FAILED."""
+    """Poll a Get* call until its status is in `ok`; fail loudly on *FAILED / *UNSUCCESSFUL."""
     deadline = time.monotonic() + timeout
     while True:
         resp = describe()
@@ -59,7 +59,7 @@ def wait_for(describe, ok: set[str], label: str, timeout: int = 300) -> dict:
         if status in ok:
             print(f"  {label}: {status}")
             return resp
-        if "FAILED" in status:
+        if "FAILED" in status or "UNSUCCESSFUL" in status:
             sys.exit(f"  {label}: {status} {resp.get('statusReasons') or resp.get('statusReason') or ''}")
         if time.monotonic() > deadline:
             sys.exit(f"  {label}: timed out in status {status}")

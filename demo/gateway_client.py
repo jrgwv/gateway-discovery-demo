@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 from functools import cache
 from pathlib import Path
 
@@ -16,6 +17,9 @@ import requests
 
 ROOT = Path(__file__).resolve().parent.parent
 SEARCH_TOOL = "x_amz_bedrock_agentcore_search"
+MAX_TOOLS = int(os.environ.get("MAX_TOOLS", "4"))  # top-k search results the agent passes to the model
+# The Gateway docs send this header on raw calls; set it to a version your gateway supports if calls are rejected.
+MCP_PROTOCOL_VERSION = os.environ.get("MCP_PROTOCOL_VERSION", "")
 _ids = itertools.count(1)
 
 
@@ -62,6 +66,7 @@ def rpc(persona: str, method: str, params: dict | None = None) -> dict:
             "Authorization": f"Bearer {access_token(persona)}",
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
+            **({"MCP-Protocol-Version": MCP_PROTOCOL_VERSION} if MCP_PROTOCOL_VERSION else {}),
         },
         json={"jsonrpc": "2.0", "id": next(_ids), "method": method, **({"params": params} if params else {})},
         timeout=60,

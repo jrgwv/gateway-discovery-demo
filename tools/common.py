@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -48,7 +49,7 @@ def http_get_json(base_url: str, params: dict[str, Any], *, raw_query: str | Non
     )
     url = f"{base_url}?{query}" if query else base_url
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-    logger.info("GET %s", url)
+    logger.info("GET %s", re.sub(r"(api_key=)[^&]+", r"\1***", url))
     try:
         with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
             return json.loads(response.read().decode("utf-8"))

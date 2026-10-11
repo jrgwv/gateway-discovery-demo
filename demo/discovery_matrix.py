@@ -34,6 +34,22 @@ def short(name: str) -> str:
     return name.split("___", 1)[-1]
 
 
+def verdict_for(mode: str, searches: int, errors: int, leaks: int) -> str:
+    """Only claim what the run can support: failed searches and LOG_ONLY runs prove nothing about filtering."""
+    if searches and errors == searches:
+        return ("Inconclusive: every search call failed, so the search tool itself is blocked or broken for these "
+                "personas (see the errors above). Nothing can be said about whether its results are policy-filtered.")
+    if leaks:
+        text = f"Search surfaced {leaks} tool(s) that tools/list hid. Intersect search results with tools/list in the agent."
+    else:
+        text = "Search results stayed inside each persona's tools/list."
+    if errors:
+        text += f" {errors} of {searches} search calls failed and are not covered by this result."
+    if mode != "ENFORCE":
+        text = f"Inconclusive in {mode}: policy is not being enforced, so this run does not test filtering. " + text
+    return text
+
+
 def probes(write: bool) -> list[tuple[str, str, dict, str]]:
     """(persona, tool, args, what we expect under ENFORCE)."""
     rows = [
@@ -67,7 +83,8 @@ def main() -> None:
         "",
     ]
     if mode != "ENFORCE":
-        lines += ["> LOG_ONLY: calls are not blocked. Check the policy decision logs for what *would* be denied.", ""]
+        lines += ["> LOG_ONLY: nothing is enforced, so this run is a smoke test only. Check the policy decision "
+                  "logs for what *would* be denied, then re-run under ENFORCE for the real answer.", ""]
 
     lines += ["## tools/list by persona", "", "| Persona | Visible tools |", "|---|---|"]
     listed: dict[str, set[str]] = {}
@@ -81,11 +98,13 @@ def main() -> None:
     lines += ["", "## Semantic search vs. tools/list", "",
               "| Persona | Query | Search returned | Hidden by tools/list but returned by search |",
               "|---|---|---|---|"]
-    leaks = 0
+    leaks = searches = errors = 0
     for persona in PERSONAS:
         for query in QUERIES:
             result = search_tools(persona, query)
+            searches += 1
             if not result["ok"]:
+                errors += 1
                 lines.append(f"| {persona} | {query} | error: {result['text'][:120]} | n/a |")
                 print(f"[search] {persona} | {query} -> ERROR {result['text'][:200]}")
                 continue
@@ -104,11 +123,7 @@ def main() -> None:
         lines.append(f"| {persona} | {short(tool)} ({arguments.get('severity', '')}) | {expected} | {got} |")
         print(f"[call] {persona} {tool} -> {got}")
 
-    verdict = (
-        "Search results stayed inside each persona's tools/list."
-        if leaks == 0
-        else f"Search surfaced {leaks} tool(s) that tools/list hid. Intersect search results with tools/list in the agent."
-    )
+    verdict = verdict_for(mode, searches, errors, leaks)
     lines += ["", f"**Verdict:** {verdict}", ""]
     RESULTS.mkdir(exist_ok=True)
     out = RESULTS / "discovery_matrix.md"
