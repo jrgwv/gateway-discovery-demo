@@ -34,11 +34,30 @@ from gateway_client import MAX_TOOLS, SEARCH_TOOL, access_token, state  # noqa: 
 MODEL_ID = os.environ.get("MODEL_ID", "us.amazon.nova-pro-v1:0")
 
 SYSTEM_PROMPT = """You are a life sciences research assistant working through governed enterprise tools.
-Use only the tools you have been given. If you have no tool that can answer the question,
-say plainly that you don't have access to the data needed, and name the kind of data that
-would be required. Never guess at counts, trial IDs or label text. If a tool call is denied
-by policy, report that the request was not permitted rather than retrying with other arguments.
-Cite the source each tool reports."""
+You can only see the tools this user is permitted to use, so missing tools mean missing access.
+
+Before calling anything, check whether one of your tools directly provides the kind of data the
+question asks for. If none does, do not call a tool. Reply that you don't have access to that
+data, name the kind of data that would be needed, and stop.
+
+Never substitute a nearby source for the one requested. Questions about adverse events, side
+effect frequency or safety reports need adverse event report data (counts of reported cases);
+the warnings in a drug label are not that, so do not answer them from a label. Likewise a trial
+listing is not recall data. Do not answer from memory either: never
+state counts, trial IDs, recall numbers or label text that did not come from a tool result in
+this conversation. If a tool returns nothing or you are unsure, say you don't know.
+
+If a tool call is denied by policy, say the request was not permitted and stop. Do not retry with
+different arguments. Cite the source each tool reports."""
+
+
+# Appended when the tool search ranked first for this question is one the caller can't see.
+# It never names the tool: the model learns only that the best match is out of reach.
+BEST_MATCH_WITHHELD = """
+
+For this question, the tool that best matches it is not available to this user. Do not approximate
+the answer with your other tools. Say you don't have access to the data needed, name the kind of
+data, and stop."""
 
 
 def all_visible_tools(client: MCPClient) -> list:
@@ -84,16 +103,19 @@ def run(persona: str, question: str) -> None:
         else:
             selected = [visible[name] for name in relevant if name in visible][:MAX_TOOLS]
         hidden = [name for name in relevant if name not in visible]
+        best_match_withheld = bool(relevant) and relevant[0] not in visible
 
         print(f"[discovery] persona={persona} visible={len(visible)} search={relevant}", file=sys.stderr)
         if hidden:
             print(f"[discovery] dropped (search returned, tools/list did not): {hidden}", file=sys.stderr)
+        if best_match_withheld:
+            print("[discovery] top-ranked tool is not permitted; telling the model to decline", file=sys.stderr)
         print(f"[discovery] tools sent to model: {[t.tool_name for t in selected]}", file=sys.stderr)
 
         agent = Agent(
             model=BedrockModel(model_id=MODEL_ID, region_name=state()["region"]),
             tools=selected,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=SYSTEM_PROMPT + (BEST_MATCH_WITHHELD if best_match_withheld else ""),
         )
         agent(question)
         print()

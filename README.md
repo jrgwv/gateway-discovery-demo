@@ -4,13 +4,22 @@ A Strands agent that discovers its tools per request through Amazon Bedrock Agen
 
 The tools are real: openFDA (adverse events, recalls, drug labels), ClinicalTrials.gov, and a DynamoDB-backed safety signal log that writes permanent records.
 
+```mermaid
+flowchart LR
+    U["Caller<br/>(persona in JWT)"] --> A["Strands agent"]
+    A -- "1. tools/list" --> G["AgentCore Gateway"]
+    A -- "2. semantic search" --> G
+    A -- "3. intersect:<br/>relevant ∩ visible" --> A
+    A -- "4. tools/call" --> G
+    G <-- "list: no arguments<br/>call: with arguments" --> P["Policy engine<br/>(Cedar)"]
+    G -- "if permitted" --> L["Lambda targets"]
+    L --> O["openFDA"]
+    L --> C["ClinicalTrials.gov"]
+    L --> D[("DynamoDB<br/>signal log")]
+    A <--> M["Bedrock<br/>Nova Pro"]
 ```
-question ──► Strands agent
-               │ 1. tools/list ─────────────► Gateway ── Policy (PartiallyAuthorizeActions) ──► only tools this persona may call
-               │ 2. x_amz_bedrock_agentcore_search ──► relevant tools for this question
-               │ 3. intersect (relevant ∩ visible), send only those schemas to the model
-               │ 4. tools/call ──────────────► Gateway ── Policy (AuthorizeAction, with input args) ──► Lambda target
-```
+
+`tools/list` is policy-filtered. Semantic search is not, so the agent only sends the model tools that appear in both. The full architecture is in [`docs/architecture.drawio`](docs/architecture.drawio) ([PNG](docs/architecture.png)), and the measured results are in [`RESULTS.md`](RESULTS.md).
 
 ## Personas and what they get
 
@@ -26,7 +35,7 @@ The `critical` rule is the interesting one. Tool listing is a meta action evalua
 
 - **Documented:** `tools/list` is filtered by policy. Calls are evaluated with the full request, including arguments. Default deny, and `forbid` wins over `permit`.
 - **Not documented either way:** whether `x_amz_bedrock_agentcore_search` results are policy-filtered, and whether the search tool itself needs a `permit`. `demo/discovery_matrix.py` answers both. The agent intersects search results with `tools/list` regardless, so it's safe whatever the answer.
-- **What we measured (us-east-1, October 2026, policy in `ENFORCE`):** search results are *not* policy-filtered. For `clinical_ops`, every query returned all six tools, including the four `tools/list` hid. The search tool needs no `permit`: it is callable by every persona, though it drops out of `tools/list` under `ENFORCE`. Policy denials arrive as a JSON-RPC error (code -32002). Run the matrix yourself; this is undocumented behaviour and may change.
+- **What we measured (us-east-1, October 2026, policy in `ENFORCE`; details in [`RESULTS.md`](RESULTS.md)):** search results are *not* policy-filtered. For `clinical_ops`, every query returned all six tools, including the four `tools/list` hid. The search tool needs no `permit`: it is callable by every persona, though it drops out of `tools/list` under `ENFORCE`. Policy denials arrive as a JSON-RPC error (code -32002). Run the matrix yourself; this is undocumented behaviour and may change.
 
 ## Layout
 
@@ -39,6 +48,9 @@ scripts/          setup_gateway.py (engine → gateway → targets → policies 
 demo/             discovery_matrix.py (step one), token_compare.py (the hook number)
 agent/            Strands agent with per-request discovery
 tests/            Offline tests (no AWS or network needed)
+docs/             architecture.drawio (editable) and architecture.png
+RESULTS.md        What a live run showed, written up for the post
+results/          Raw output of the last matrix and token runs
 ```
 
 ## Run it
@@ -66,7 +78,7 @@ uv run agent/agent.py --persona clinical_ops "What are the top serious adverse e
 uv run agent/agent.py --persona safety_analyst "Log a critical signal for drug X based on faers:drug x"
 ```
 
-The second agent run is the interesting one: search ranks `search_adverse_events` first, but the clinical ops persona can't see it, so the agent drops it and the model only gets `get_drug_label` and `search_trials`. Watch what the model does next. In our run Nova Pro answered from the drug label's warnings instead of saying it lacked adverse event data, so the tool boundary held but the answer was a substitute. The third run shows a listed tool denied at call time (Strands logs the `MCPError` traceback before the agent reports the denial).
+The second agent run is the failure case: search ranks `search_adverse_events` first, but the clinical ops persona can't see it, so the agent drops it and the model only gets `get_drug_label` and `search_trials`. The agent replies that it doesn't have access to adverse event report data. The third run shows a listed tool denied at call time (Strands logs the `MCPError` traceback before the agent reports the denial).
 
 `MODEL_ID` defaults to `us.amazon.nova-pro-v1:0`. Set it to any Bedrock model or inference profile with tool use that you have access to. Anthropic models need the use case form submitted in the Bedrock console first.
 
@@ -86,6 +98,7 @@ Teardown waits for each delete to finish. If something can't be deleted it keeps
 - **The Gateway throttles bursts** (HTTP 429), semantic search especially. The raw client retries with backoff.
 - **Gateway execution role** needs `AuthorizeAction`, `PartiallyAuthorizeActions` and `GetPolicyEngine`, or every call is denied. The CDK stack grants them on `policy-engine/*` and `gateway/*` in-account. Scope them to the IDs in `.demo-state.json` once setup has run.
 - **The role running setup** needs `bedrock-agentcore:InvokeGateway`, because `CreatePolicy` validates actions by calling the gateway.
+- **Hiding a tool isn't enough to get "I don't have access".** With only a generic instruction, the model answered the adverse-event question from the drug label instead. The agent now has a stricter system prompt, and when the top-ranked search result is a tool the caller can't see, it tells the model the best match is unavailable (without naming it) and to decline. That second, deterministic signal is what made the decline reliable. It depends on search being unfiltered; if that changes, only the prompt remains.
 - **Why a `persona` claim?** Cedar reads JWT claims as string tags. Cognito's `cognito:groups` is an array, so the pre-token trigger flattens it into one string. Access-token customization needs the Cognito Essentials plan.
 - **Drug name lookups** try the generic name, then the brand name. A name also matches combination products (`metformin` matches sitagliptin/metformin), so `get_drug_label` prefers the single-ingredient label and returns `active_ingredients` and `combination_product` so the agent can say which product it read.
 - **If the search tool is denied** under `ENFORCE`, the matrix says so and its verdict is "inconclusive", and the agent falls back to everything `tools/list` returned (still policy-filtered, just no token saving).
